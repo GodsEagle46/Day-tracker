@@ -53,7 +53,17 @@ h1,h2{font-family:var(--display);margin:0;text-wrap:balance}
 .note{font-size:.85rem;color:var(--muted);margin:0}
 .banner{background:color-mix(in srgb,var(--accent) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:12px;padding:10px 14px;font-size:.9rem;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .list{overflow:hidden}
-.task{display:grid;grid-template-columns:4px 84px 1fr 28px;align-items:center;gap:12px;padding:11px 14px 11px 0;border-top:1px solid var(--line);cursor:pointer}
+.task{display:grid;grid-template-columns:4px 84px 1fr 34px 28px;align-items:center;gap:10px;padding:11px 14px 11px 0;border-top:1px solid var(--line)}
+.task label{cursor:pointer;min-width:0}
+.edit{width:34px;height:34px;border:1px solid transparent;background:none;border-radius:8px;cursor:pointer;color:var(--muted);font-size:1rem}
+.edit:hover{border-color:var(--line);color:var(--fg)}
+.oneoff{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.sheet-bg{position:fixed;inset:0;background:color-mix(in srgb,#000 45%,transparent);z-index:30;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;max-height:92vh;overflow:auto}
+.sheet h2{font-size:1.15rem;margin-bottom:4px}
+.sheet fieldset{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:4px 0 0;display:flex;flex-direction:column;gap:6px}
+.sheet fieldset label{display:flex;gap:8px;align-items:center;cursor:pointer}
+input[type=time]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;min-width:0}
 .task:first-child{border-top:0}
 .task .bar{align-self:stretch;margin-block:-11px}
 .task time{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1.25}
@@ -88,7 +98,7 @@ textarea{resize:vertical;line-height:1.5}
 .tabbar button{border:0;background:none;padding:12px 0 14px;cursor:pointer;font-weight:700;color:var(--muted)}
 .tabbar button[aria-selected="true"]{color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(70px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:.9rem;z-index:20}
-@media (max-width:380px){.task{grid-template-columns:4px 64px 1fr 26px;gap:10px}.slot{grid-template-columns:84px 1fr}}
+@media (max-width:380px){.task{grid-template-columns:4px 60px 1fr 32px 26px;gap:8px}.slot{grid-template-columns:84px 1fr}}
 </style>
 </head>
 <body>
@@ -131,6 +141,7 @@ textarea{resize:vertical;line-height:1.5}
     </div>
     <div class="row"><p class="note" id="dayoffNote" style="flex:1"></p><button class="link" id="toggleOff"></button></div>
     <div class="list" id="list" role="list"></div>
+    <div><button class="btn" id="addTask">+ Add task</button></div>
     <div class="card">
       <h2>Reflection</h2>
       <label class="lbl" for="refl">What went well? What would I change?</label>
@@ -205,6 +216,22 @@ textarea{resize:vertical;line-height:1.5}
   <button role="tab" id="t-settings" aria-selected="false">Settings</button>
 </nav>
 <div class="toast" id="toast" hidden></div>
+<div class="sheet-bg" id="sheet" hidden>
+  <form class="sheet" id="sheetForm" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" novalidate>
+    <h2 id="sheetTitle">Edit task</h2>
+    <label class="lbl" for="fWhat">Activity</label><input type="text" id="fWhat" placeholder="e.g. Office hours">
+    <div class="row"><div style="flex:1;min-width:120px"><label class="lbl" for="fStart">Start</label><input type="time" id="fStart"></div>
+      <div style="flex:1;min-width:120px"><label class="lbl" for="fEnd">End (optional)</label><input type="time" id="fEnd"></div></div>
+    <label class="lbl" for="fCat">Role</label><select id="fCat"></select>
+    <label class="lbl" for="fNote">Note (optional)</label><input type="text" id="fNote">
+    <fieldset id="scopeBox"><legend class="lbl">Apply to</legend>
+      <label><input type="radio" name="scope" value="day" id="scDay"> <span>Only <span id="scDayLbl"></span></span></label>
+      <label><input type="radio" name="scope" value="all" id="scAll"> <span>Every <span id="scAllLbl"></span></span></label>
+    </fieldset>
+    <p class="note" id="sheetMsg" role="status"></p>
+    <div class="row"><button type="submit" class="btn primary">Save</button><button type="button" class="btn" id="fCancel">Cancel</button><button type="button" class="btn danger" id="fDelete" style="margin-left:auto">Delete</button></div>
+  </form>
+</div>
 
 <script>
 "use strict";
@@ -256,7 +283,18 @@ function toast(t){const e=document.getElementById("toast");e.textContent=t;e.hid
 /* ---------- schedule helpers ---------- */
 const catOf=id=>S.cats.find(c=>c.id===id)||{name:"—",color:"#999"};
 const isOff=k=>k in S.offs;
-const sched=k=>S.templates[isOff(k)?"off":String(fromKey(k).getDay())]||[];
+const tplKey=k=>isOff(k)?"off":String(fromKey(k).getDay());
+const custom=k=>(S.dayCustom||{})[k]||{extra:[],hidden:{}};
+const ensureCustom=k=>{S.dayCustom=S.dayCustom||{};return S.dayCustom[k]||(S.dayCustom[k]={extra:[],hidden:{}})};
+function timed(k){const base=S.templates[tplKey(k)]||[],sl=slots(base),c=custom(k);
+  const out=base.map((t,i)=>({t,a:sl[i][0],e:sl[i][1],src:"tpl"})).filter(x=>!c.hidden[x.t.id]);
+  for(const t of c.extra)out.push({t,a:t.start??null,e:t.end??(t.start!=null?t.start+1:null),src:"day"});
+  return out.map((x,i)=>({...x,i})).sort((p,q)=>((p.a??1e9)-(q.a??1e9))||(p.i-q.i))}
+const sched=k=>timed(k).map(x=>x.t);
+const fmtMin=m=>{const h=Math.floor(m/60)%24;return (h%12||12)+":"+String(m%60).padStart(2,"0")};
+const fmtRange=(a,e)=>a==null?"":(e!=null?fmtMin(a)+"–"+fmtMin(e):fmtMin(a));
+const toInput=m=>m==null?"":String(Math.floor(m/60)%24).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+const fromInput=v=>{if(!v)return null;const [h,m]=v.split(":").map(Number);return h*60+m};
 const dayState=k=>S.days[k]||{done:{},reflection:"",notes:""};
 const ensure=k=>S.days[k]||(S.days[k]={done:{},reflection:"",notes:""});
 function stats(k){const s=sched(k),d=dayState(k).done;let n=0;for(const t of s)if(d[t.id])n++;return{n,total:s.length}}
@@ -281,14 +319,18 @@ function renderToday(){
     b.innerHTML="<b></b><span></span><i><em></em></i>";b.querySelector("b").textContent=fmt(k,{weekday:"short"});b.querySelector("span").textContent=fromKey(k).getDate();
     b.querySelector("em").style.width=(x.total?Math.round(100*x.n/x.total):0)+"%";b.onclick=()=>{cur=k;renderToday()};strip.appendChild(b)}
   const list=document.getElementById("list");list.innerHTML="";
-  if(!s.length){list.innerHTML='<div class="empty">Nothing planned for this day yet. Add time slots in Plan.</div>'}
-  const now=new Date(),nm=now.getHours()*60+now.getMinutes(),sl=slots(s),isToday=cur===todayKey();
-  s.forEach((t,i)=>{const c=catOf(t.cat),row=document.createElement("label");row.className="task"+(st.done[t.id]?" done":"");row.setAttribute("role","listitem");
-    row.innerHTML='<span class="bar"></span><time></time><span class="what"><div></div><small></small></span><input type="checkbox">';
+  const tl=timed(cur);
+  if(!tl.length){list.innerHTML='<div class="empty">Nothing planned for this day yet. Tap Add task.</div>'}
+  const now=new Date(),nm=now.getHours()*60+now.getMinutes(),isToday=cur===todayKey();
+  tl.forEach(x=>{const t=x.t,c=catOf(t.cat),row=document.createElement("div");row.className="task"+(st.done[t.id]?" done":"");row.setAttribute("role","listitem");
+    row.innerHTML='<span class="bar"></span><label><time></time></label><label class="what"><div></div><small></small></label><button type="button" class="edit">✎</button><input type="checkbox">';
     row.querySelector(".bar").style.background=c.color;row.querySelector("time").textContent=t.time;row.querySelector(".what div").textContent=t.what;
-    row.querySelector("small").textContent=c.name+(t.note?" · "+t.note:"");
-    const cb=row.querySelector("input");cb.id="cb-"+t.id;cb.checked=!!st.done[t.id];
-    if(isToday&&sl[i][0]!=null&&nm>=sl[i][0]&&nm<sl[i][1])row.classList.add("now");
+    const sm=row.querySelector("small");sm.textContent=c.name+(t.note?" · "+t.note:"");
+    if(x.src==="day"){const o=document.createElement("span");o.className="oneoff";o.textContent=" · this day only";sm.appendChild(o)}
+    const cb=row.querySelector("input");cb.id="cb-"+t.id;cb.checked=!!st.done[t.id];cb.setAttribute("aria-label","Done: "+t.what);
+    row.querySelectorAll("label").forEach(l=>l.htmlFor=cb.id);
+    const ed=row.querySelector(".edit");ed.setAttribute("aria-label","Edit "+t.what);ed.onclick=()=>openSheet("edit",x);
+    if(isToday&&x.a!=null&&nm>=x.a&&nm<x.e)row.classList.add("now");
     cb.onchange=()=>{const d=ensure(cur);if(cb.checked)d.done[t.id]=true;else delete d.done[t.id];saveDay(cur);row.classList.toggle("done",cb.checked);summary();
       const e=document.querySelector('.day[aria-current="date"] em');if(e){const x=stats(cur);e.style.width=Math.round(100*x.n/x.total)+"%"}};
     list.appendChild(row)});
@@ -373,6 +415,61 @@ document.getElementById("loadExample").onclick=()=>askReset("example");
 document.getElementById("resetBlank").onclick=()=>askReset("blank");
 document.getElementById("confirmNo").onclick=()=>{document.getElementById("resetRow").hidden=false;document.getElementById("confirmRow").hidden=true};
 document.getElementById("confirmYes").onclick=()=>{S=pendingReset==="example"?example():blankState();saveLocal();pushAll(true);document.getElementById("confirmNo").onclick();toast("Done.");renderAll()};
+
+/* ---------- add / edit tasks ---------- */
+let ed=null,delArmed=false;
+function openSheet(mode,x){
+  ed={mode,x,k:cur};delArmed=false;
+  const t=x?x.t:null, sel=document.getElementById("fCat");sel.innerHTML="";
+  for(const c of S.cats){const o=document.createElement("option");o.value=c.id;o.textContent=c.name;sel.appendChild(o)}
+  document.getElementById("sheetTitle").textContent=mode==="add"?"Add task":"Edit task";
+  document.getElementById("fWhat").value=t?t.what:"";
+  document.getElementById("fStart").value=x?toInput(x.a):"";
+  document.getElementById("fEnd").value=x&&x.e!=null&&x.e!==x.a+1?toInput(x.e):"";
+  sel.value=t?t.cat:(S.cats[0]?.id||"");document.getElementById("fNote").value=t?t.note||"":"";
+  document.getElementById("scDayLbl").textContent=fmt(cur,{weekday:"long",month:"short",day:"numeric"});
+  document.getElementById("scAllLbl").textContent=isOff(cur)?"day off":fmt(cur,{weekday:"long"});
+  document.getElementById("scopeBox").hidden=!!(x&&x.src==="day");
+  document.getElementById("scDay").checked=true;
+  const del=document.getElementById("fDelete");del.hidden=mode==="add";del.textContent="Delete";
+  document.getElementById("sheetMsg").textContent="";
+  document.getElementById("sheet").hidden=false;setTimeout(()=>document.getElementById("fWhat").focus(),50);
+}
+function closeSheet(){document.getElementById("sheet").hidden=true;ed=null}
+function placeInTemplate(arr,item,a){
+  const i=arr.indexOf(item);if(i>=0)arr.splice(i,1);
+  if(a==null){arr.push(item);return}
+  const sl=slots(arr);let at=arr.length;for(let j=0;j<arr.length;j++)if(sl[j][0]!=null&&sl[j][0]>a){at=j;break}
+  arr.splice(at,0,item);
+}
+document.getElementById("sheetForm").addEventListener("submit",e=>{e.preventDefault();if(!ed)return;
+  const what=document.getElementById("fWhat").value.trim();if(!what){document.getElementById("sheetMsg").textContent="Give the task a name.";return}
+  let a=fromInput(document.getElementById("fStart").value),en=fromInput(document.getElementById("fEnd").value);
+  if(a==null&&en!=null){a=en;en=null}if(a!=null&&en!=null&&en<=a)en+=1440;
+  const f={what,cat:document.getElementById("fCat").value,note:document.getElementById("fNote").value.trim(),time:fmtRange(a,en)};
+  const scope=document.getElementById("scAll").checked?"all":"day",k=ed.k,x=ed.x;
+  if(ed.mode==="add"){
+    if(scope==="day")ensureCustom(k).extra.push({id:uid(),...f,start:a,end:en});
+    else{const arr=S.templates[tplKey(k)]||(S.templates[tplKey(k)]=[]);placeInTemplate(arr,{id:uid(),...f},a)}
+  }else if(x.src==="day"){Object.assign(x.t,f,{start:a,end:en})}
+  else if(scope==="all"){Object.assign(x.t,f);placeInTemplate(S.templates[tplKey(k)],x.t,a)}
+  else{const c=ensureCustom(k),nid=uid();c.hidden[x.t.id]=true;c.extra.push({id:nid,...f,start:a,end:en});
+    const d=dayState(k);if(d.done[x.t.id]){const dd=ensure(k);delete dd.done[x.t.id];dd.done[nid]=true;saveDay(k)}}
+  const msg=scope==="all"&&!(x&&x.src==="day")?"Saved for every "+(isOff(k)?"day off":fmt(k,{weekday:"long"}))+".":"Saved for this day.";
+  S.example=false;save();closeSheet();renderToday();toast(msg);
+});
+document.getElementById("fDelete").onclick=()=>{if(!ed||ed.mode!=="edit")return;
+  const b=document.getElementById("fDelete");if(!delArmed){delArmed=true;b.textContent="Tap again to delete";return}
+  const k=ed.k,x=ed.x,scope=document.getElementById("scAll").checked?"all":"day";
+  if(x.src==="day"){const c=ensureCustom(k);c.extra=c.extra.filter(t=>t!==x.t)}
+  else if(scope==="all"){const arr=S.templates[tplKey(k)];arr.splice(arr.indexOf(x.t),1)}
+  else ensureCustom(k).hidden[x.t.id]=true;
+  if(dayState(k).done[x.t.id]){delete ensure(k).done[x.t.id];saveDay(k)}
+  S.example=false;save();closeSheet();renderToday();toast("Deleted.")};
+document.getElementById("fCancel").onclick=closeSheet;
+document.getElementById("sheet").addEventListener("click",e=>{if(e.target.id==="sheet")closeSheet()});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!document.getElementById("sheet").hidden)closeSheet()});
+document.getElementById("addTask").onclick=()=>openSheet("add",null);
 
 /* ---------- tabs ---------- */
 function show(v){document.getElementById("v-auth").hidden=v!=="auth";document.querySelector(".tabbar").hidden=v==="auth";for(const n of ["today","plan","settings"]){document.getElementById("v-"+n).hidden=n!==v;document.getElementById("t-"+n).setAttribute("aria-selected",n===v)}
